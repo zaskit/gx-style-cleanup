@@ -287,6 +287,144 @@ function gx_cleanup_page() {
     echo '</div>';
 }
 
+// ── Customer Export Tool ───────────────────────────────────────────
+
+add_action( 'admin_menu', function() {
+    add_management_page( 'GX Customer Export', 'GX Customer Export', 'manage_options', 'gx-customer-export', 'gx_customer_export_page' );
+});
+
+function gx_customer_export_page() {
+    if ( ! current_user_can( 'manage_options' ) ) return;
+
+    // Handle CSV download
+    if ( isset( $_POST['gx_export_csv'] ) ) {
+        check_admin_referer( 'gx_export' );
+
+        $orders = wc_get_orders( array(
+            'limit'  => -1,
+            'status' => array( 'wc-completed', 'wc-processing', 'wc-on-hold', 'wc-refunded' ),
+            'orderby' => 'date',
+            'order'   => 'DESC',
+        ));
+
+        $customers = array();
+        foreach ( $orders as $order ) {
+            $email = $order->get_billing_email();
+            if ( ! $email ) continue;
+
+            if ( ! isset( $customers[ $email ] ) ) {
+                $customers[ $email ] = array(
+                    'email'      => $email,
+                    'first_name' => $order->get_billing_first_name(),
+                    'last_name'  => $order->get_billing_last_name(),
+                    'company'    => $order->get_billing_company(),
+                    'phone'      => $order->get_billing_phone(),
+                    'city'       => $order->get_billing_city(),
+                    'state'      => $order->get_billing_state(),
+                    'country'    => $order->get_billing_country(),
+                    'orders'     => 0,
+                    'total_spent' => 0,
+                    'first_order' => $order->get_date_created() ? $order->get_date_created()->format( 'Y-m-d' ) : '',
+                    'last_order'  => $order->get_date_created() ? $order->get_date_created()->format( 'Y-m-d' ) : '',
+                );
+            }
+
+            $customers[ $email ]['orders']++;
+            $customers[ $email ]['total_spent'] += (float) $order->get_total();
+
+            // Track earliest order
+            $date = $order->get_date_created() ? $order->get_date_created()->format( 'Y-m-d' ) : '';
+            if ( $date && ( ! $customers[ $email ]['first_order'] || $date < $customers[ $email ]['first_order'] ) ) {
+                $customers[ $email ]['first_order'] = $date;
+            }
+        }
+
+        // Sort by total spent descending
+        usort( $customers, function( $a, $b ) {
+            return $b['total_spent'] <=> $a['total_spent'];
+        });
+
+        header( 'Content-Type: text/csv; charset=utf-8' );
+        header( 'Content-Disposition: attachment; filename="gx-customers-' . date( 'Y-m-d' ) . '.csv"' );
+
+        $out = fopen( 'php://output', 'w' );
+        fputcsv( $out, array( 'Email', 'First Name', 'Last Name', 'Company', 'Phone', 'City', 'State', 'Country', 'Orders', 'Total Spent', 'First Order', 'Last Order' ) );
+
+        foreach ( $customers as $c ) {
+            fputcsv( $out, array(
+                $c['email'], $c['first_name'], $c['last_name'], $c['company'],
+                $c['phone'], $c['city'], $c['state'], $c['country'],
+                $c['orders'], number_format( $c['total_spent'], 2 ), $c['first_order'], $c['last_order'],
+            ));
+        }
+
+        fclose( $out );
+        exit;
+    }
+
+    // Preview page
+    echo '<div class="wrap"><h1>GX Customer Export</h1>';
+
+    $orders = wc_get_orders( array(
+        'limit'  => -1,
+        'status' => array( 'wc-completed', 'wc-processing', 'wc-on-hold', 'wc-refunded' ),
+        'orderby' => 'date',
+        'order'   => 'DESC',
+    ));
+
+    $customers = array();
+    foreach ( $orders as $order ) {
+        $email = $order->get_billing_email();
+        if ( ! $email ) continue;
+
+        if ( ! isset( $customers[ $email ] ) ) {
+            $customers[ $email ] = array(
+                'email'      => $email,
+                'first_name' => $order->get_billing_first_name(),
+                'last_name'  => $order->get_billing_last_name(),
+                'orders'     => 0,
+                'total_spent' => 0,
+            );
+        }
+        $customers[ $email ]['orders']++;
+        $customers[ $email ]['total_spent'] += (float) $order->get_total();
+    }
+
+    usort( $customers, function( $a, $b ) {
+        return $b['total_spent'] <=> $a['total_spent'];
+    });
+
+    echo '<p><strong>' . count( $orders ) . '</strong> orders from <strong>' . count( $customers ) . '</strong> unique customers.</p>';
+
+    echo '<form method="post">';
+    wp_nonce_field( 'gx_export' );
+    echo '<p><button type="submit" name="gx_export_csv" value="1" class="button button-primary button-hero">Download CSV</button></p>';
+    echo '</form>';
+
+    echo '<h3>Preview (top 50 by spend)</h3>';
+    echo '<table class="widefat striped"><thead><tr><th>Email</th><th>Name</th><th>Orders</th><th>Total Spent</th></tr></thead><tbody>';
+
+    $shown = 0;
+    foreach ( $customers as $c ) {
+        if ( $shown >= 50 ) break;
+        echo '<tr>';
+        echo '<td>' . esc_html( $c['email'] ) . '</td>';
+        echo '<td>' . esc_html( $c['first_name'] . ' ' . $c['last_name'] ) . '</td>';
+        echo '<td>' . esc_html( $c['orders'] ) . '</td>';
+        echo '<td>$' . esc_html( number_format( $c['total_spent'], 2 ) ) . '</td>';
+        echo '</tr>';
+        $shown++;
+    }
+
+    echo '</tbody></table>';
+
+    if ( count( $customers ) > 50 ) {
+        echo '<p class="description">' . ( count( $customers ) - 50 ) . ' more customers — download CSV for full list.</p>';
+    }
+
+    echo '</div>';
+}
+
 // Enqueue the generated CSS on frontend (if saved to file)
 add_action( 'wp_enqueue_scripts', function() {
     $css_file = get_stylesheet_directory() . '/gx-product-styles.css';
