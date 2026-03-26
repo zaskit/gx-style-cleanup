@@ -81,12 +81,6 @@ function gx_cleanup_page() {
     echo '<div class="wrap"><h1>GX Style Cleanup</h1>';
     echo '<p>' . count( $products ) . ' products found.</p>';
 
-    // ── ANALYZE ──
-    if ( $action === 'analyze' || ! $action ) {
-        check_admin_referer( 'gx_cleanup' );
-        // Only check referer on POST
-    }
-
     if ( ! $action ) {
         $total = 0;
         echo '<table class="widefat striped"><thead><tr><th>ID</th><th>Product</th><th>Content Styles</th><th>Excerpt Styles</th><th>Total</th></tr></thead><tbody>';
